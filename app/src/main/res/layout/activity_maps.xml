@@ -2,7 +2,8 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_height="match_parent"
     android:layout_width="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:focusableInTouchMode="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -11,11 +12,17 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Source:"/>
-        <EditText
-            android:id="@+id/source"
+            android:minWidth="100dp"
+            android:text="Source:"
+            android:textSize="15dp"
+            android:layout_gravity="center"
+            android:gravity="left"
+            android:paddingLeft="5dp"/>
+        <fragment
+            android:id="@+id/place_autocomplete_fragment_source"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:name="com.google.android.gms.location.places.ui.PlaceAutocompleteFragment"/>
     </LinearLayout>
 
     <LinearLayout
@@ -25,18 +32,39 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minWidth="100dp"
+            android:textSize="15dp"
+            android:gravity="left"
+            android:layout_gravity="center"
+            android:paddingLeft="5dp"
             android:text="Destination:"/>
-        <EditText
-            android:id="@+id/destination"
+        <fragment
+            android:id="@+id/place_autocomplete_fragment_destination"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:name="com.google.android.gms.location.places.ui.PlaceAutocompleteFragment"/>
     </LinearLayout>
 
-    <Button
-        android:id="@+id/navigateButton"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Navigate"/>
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/navigateButtonCycling"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Navigate by cycling"/>
+
+        <Button
+            android:id="@+id/navigateButtonWalking"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Navigate by walking"/>
+
+    </LinearLayout>
 
     <fragment xmlns:android="http://schemas.android.com/apk/res/android"
         xmlns:map="http://schemas.android.com/apk/res-auto"
@@ -45,6 +73,6 @@
         android:name="com.google.android.gms.maps.SupportMapFragment"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        tools:context="com.project.jilin.googletestapp.MapsActivity" />
+        tools:context="com.project.jilin.googletestapp.MapsActivity"/>
 </LinearLayout>
 

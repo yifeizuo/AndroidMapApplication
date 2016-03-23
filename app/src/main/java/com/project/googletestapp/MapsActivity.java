@@ -1,10 +1,11 @@
-package com.project.jilin.googletestapp;
+package com.project.googletestapp;
 
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.location.Location;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -13,6 +14,7 @@ import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
@@ -27,29 +29,40 @@ import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.LocationSettingsRequest;
 import com.google.android.gms.location.LocationSettingsResult;
-import com.google.android.gms.location.LocationSettingsStates;
 import com.google.android.gms.location.LocationSettingsStatusCodes;
+import com.google.android.gms.location.places.Place;
+import com.google.android.gms.location.places.ui.PlaceAutocompleteFragment;
+import com.google.android.gms.location.places.ui.PlaceSelectionListener;
+import com.google.android.gms.maps.CameraUpdate;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
-import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.common.api.GoogleApiClient.ConnectionCallbacks;
 import com.google.android.gms.common.api.GoogleApiClient.OnConnectionFailedListener;
+import com.google.android.gms.maps.model.Marker;
+import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.Polyline;
 import com.google.android.gms.maps.model.PolylineOptions;
 import com.google.maps.DirectionsApi;
 import com.google.maps.DirectionsApiRequest;
 import com.google.maps.GeoApiContext;
+import com.google.maps.android.PolyUtil;
 import com.google.maps.model.DirectionsLeg;
 import com.google.maps.model.DirectionsResult;
 import com.google.maps.model.DirectionsRoute;
 import com.google.maps.model.DirectionsStep;
+import com.google.maps.model.Geometry;
 import com.google.maps.model.TravelMode;
 
 import java.text.DateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 //https://developers.google.com/maps/web-services/client-library#terms_and_conditions
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback,
@@ -72,7 +85,25 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private Location mCurrentLocation;
     private static final String LAST_UPDATED_TIME_STRING_KEY = "4";
     private String mLastUpdateTime;
-    private Button mNavigateButton;
+    //Camera zoom level
+    private static final int ZOOM_LEVEL = 15;
+
+    private Button mNavigateButtonWalking;
+    private Button mNavigationButtonCycling;
+
+    private PlaceAutocompleteFragment mSourceAutocomplete;
+    private PlaceAutocompleteFragment mDestinationAutocomplete;
+
+    private LatLng mSourceLatLng = null;
+    private LatLng mDestinationLatLng = null;
+
+    //It should be linked hash map, since we can compare each step with current location in an order, so that display proper HTML instruction (from source to destination)
+    private LinkedHashMap<List<LatLng>, String> mInstructionsMap = new LinkedHashMap<>();
+
+    private Marker mDestinationMarker = null;
+
+    private Toast mInstructionToast = null;
+
     private static final String GOOGLE_MAPS_SERVER_API_KEY = "AIzaSyAGFZeAMuorbEdxNitNHt7l1PIbsvveQ4I";
 
     @Override
@@ -129,11 +160,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
-        mNavigateButton = (Button) findViewById(R.id.navigateButton);
-        // Obtain the SupportMapFragment and get notified when the map is ready to be used.
-        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
-                .findFragmentById(R.id.map);
-        mapFragment.getMapAsync(this);
+
+        initializeViews();
 
         // Create an instance of GoogleAPIClient.
         if (mGoogleApiClient == null) {
@@ -144,7 +172,28 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     .build();
         }
 
+        // Obtain the SupportMapFragment and get notified when the map is ready to be used.
+        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
+                .findFragmentById(R.id.map);
+        mapFragment.getMapAsync(this);
+
+        initializeListeners();
+    }
+
+    private void initializeViews() {
+        mNavigateButtonWalking = (Button) findViewById(R.id.navigateButtonWalking);
+        mNavigationButtonCycling = (Button) findViewById(R.id.navigateButtonCycling);
+
+        mSourceAutocomplete = (PlaceAutocompleteFragment) getFragmentManager().findFragmentById(R.id.place_autocomplete_fragment_source);
+        mDestinationAutocomplete = (PlaceAutocompleteFragment) getFragmentManager().findFragmentById(R.id.place_autocomplete_fragment_destination);
+
+        mInstructionToast = Toast.makeText(getApplicationContext(), "", Toast.LENGTH_LONG);
+        mInstructionToast.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT, 0, 0);
+    }
+
+    private void initializeListeners() {
         addNavigateButtonListener();
+        addAutoCompleteListeners();
     }
 
     @Override
@@ -177,6 +226,11 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         if (mRequestingLocationUpdates) {
             startLocationUpdates();
         }
+
+        //Once connected, move camera to current location if possible
+        if (mLastLocation != null && mMap != null) {
+            mMap.moveCamera(CameraUpdateFactory.newLatLng(new LatLng(mLastLocation.getLatitude(), mLastLocation.getLongitude())));
+        }
     }
 
     @Override
@@ -205,7 +259,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         checkLocationSettings();
                     } else {
                         //TODO - It requires another click to activate camera move to current location. Perhaps await for PendingResult?
-                        mMap.moveCamera(CameraUpdateFactory.newLatLng(new LatLng(mLastLocation.getLatitude(), mLastLocation.getLongitude())));
+                        mMap.moveCamera(CameraUpdateFactory.newLatLng(Utils.LocationToAndroidLatLng(mLastLocation)));
                     }
 
                     return false;
@@ -231,11 +285,6 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         Log.d(TAG, "onMapReady");
 
         mMap = googleMap;
-
-        // Add a marker in Sydney and move the camera
-        LatLng sydney = new LatLng(-34, 151);
-        mMap.addMarker(new MarkerOptions().position(sydney).title("Marker in Sydney"));
-        mMap.moveCamera(CameraUpdateFactory.newLatLng(sydney));
 
         createLocationRequest();
 
@@ -284,8 +333,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     protected void createLocationRequest() {
         mLocationRequest = new LocationRequest();
-        mLocationRequest.setInterval(1000 * 10);
-        mLocationRequest.setFastestInterval(1000 * 5);
+        mLocationRequest.setInterval(1000 * 5);
+        mLocationRequest.setFastestInterval(1000 * 3);
         mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
     }
 
@@ -325,6 +374,32 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         mCurrentLocation = location;
         mLastUpdateTime = DateFormat.getTimeInstance().format(new Date());
         //updateUI ---> lat, long, mLastUpdateTime
+
+        Toast.makeText(getApplicationContext(), "location update", Toast.LENGTH_SHORT).show();
+
+        //TODO: Check current location and display html instruction as an overlay until switch to another step
+        for (Map.Entry<List<LatLng>, String> entry: mInstructionsMap.entrySet()) {
+            List<LatLng> step = entry.getKey();
+            String instruction = entry.getValue();
+
+            Log.d(TAG, "sss");
+
+            //If current location is on a path of the whole navigation route
+            if ( PolyUtil.isLocationOnPath(Utils.LocationToAndroidLatLng(mCurrentLocation), step, false) ) {
+                //Update instruction to user
+                mInstructionToast.setText(instruction);
+                mInstructionToast.show();
+                break;
+            }
+        }
+
+        //TODO: End navigation with notification, maybe need some tolerance
+        if (Utils.LocationToAndroidLatLng(mCurrentLocation) == mDestinationLatLng) {
+            mInstructionToast.setText("Done navigation");
+            mInstructionToast.show();
+
+            //TODO: some cleaning
+        }
     }
 
     protected void startLocationUpdates() {
@@ -338,67 +413,152 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             LocationServices.FusedLocationApi.removeLocationUpdates(mGoogleApiClient, this);
     }
 
-    private void addNavigateButtonListener() {
+    private void navigationButtonOnClickEvent(boolean isCycling) {
+        if (mSourceLatLng == null || mDestinationLatLng == null) {
+            Toast.makeText(getApplicationContext(), "Please select source and destination!", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-        mNavigateButton.setOnClickListener(new View.OnClickListener() {
+        //TODO: Remove old polylines and destination marker, polyline-instruction map
+        mMap.clear();
+        mInstructionsMap.clear();
+        mInstructionToast.cancel();
+
+        //Add destination marker
+        mDestinationMarker = mMap.addMarker(new MarkerOptions()
+                .position(mDestinationLatLng)
+                .title("Your destination"));
+
+        //Zoom camera to source location. Running on UI thread so that the zoom process won't be interrupted
+        runOnUiThread(new Runnable() {
             @Override
-            public void onClick(View v) {
-                GeoApiContext context = new GeoApiContext().setApiKey(GOOGLE_MAPS_SERVER_API_KEY);
-                if (mCurrentLocation == null)
-                    return;
-                DirectionsApiRequest request = DirectionsApi.newRequest(context)
-                        .origin(new com.google.maps.model.LatLng(mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude()))
-                        .destination(new com.google.maps.model.LatLng(65.0115702,25.4669972))
-                        .mode(TravelMode.WALKING);
+            public void run() {
+                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(mSourceLatLng, ZOOM_LEVEL));
+            }
+        });
 
-                //Async request
-                //Same as the link: by default mode is driving, so we need to set it to walking or bicycling
-                //<a href="https://maps.googleapis.com/maps/api/directions/json?origin=Erkki%20Koiso-Kanttilan%20katu%203,%2090570%20Oulu,%20Finland&destination=Saaristonkatu%206,%2090100%20Oulu,%20Finland&mode=walking&key=AIzaSyAGFZeAMuorbEdxNitNHt7l1PIbsvveQ4I">
-                request.setCallback(new com.google.maps.PendingResult.Callback<DirectionsResult>() {
-                    @Override
-                    public void onResult(DirectionsResult result) {
-                        Log.d(TAG, "Request successfully");
-                        DirectionsRoute[] routes = result.routes;
-                        //There maybe many routes
-                        for (DirectionsRoute route: routes) {
-                            //There maybe many legs in one route
-                            for(DirectionsLeg leg: route.legs) {
-                                //Same for start address and start location
-                                Log.d(TAG, "Distance: " + leg.distance.humanReadable
-                                    + " Duration: " + leg.duration.humanReadable
-                                    + " End address: " + leg.endAddress
-                                    + " End location: " + leg.endLocation.toString());
-                                for (DirectionsStep step: leg.steps) {
-                                    //step.distance.humanReadable
-                                    //step.duration.humanReadable
-                                    //step.endLocation.toString(), step.startLocation.toString()
+        //Draw polyline based on source and destination
+        GeoApiContext context = new GeoApiContext().setApiKey(GOOGLE_MAPS_SERVER_API_KEY);
+        DirectionsApiRequest request = DirectionsApi.newRequest(context)
+                .origin(new com.google.maps.model.LatLng(mSourceLatLng.latitude, mSourceLatLng.longitude))
+                .destination(new com.google.maps.model.LatLng(mDestinationLatLng.latitude, mDestinationLatLng.longitude))
+                .mode((isCycling) ? TravelMode.BICYCLING : TravelMode.WALKING);
+        request.setCallback(new com.google.maps.PendingResult.Callback<DirectionsResult>() {
+            @Override
+            public void onResult(DirectionsResult result) {
+                Log.d(TAG, "Request successfully");
+                DirectionsRoute[] routes = result.routes;
+                //There maybe many routes
+                for (DirectionsRoute route : routes) {
+                    //There maybe many legs in one route
+                    for (DirectionsLeg leg : route.legs) {
+                        //Same for start address and start location
+                        Log.d(TAG, "Distance: " + leg.distance.humanReadable
+                                + " Duration: " + leg.duration.humanReadable
+                                + " End address: " + leg.endAddress
+                                + " End location: " + leg.endLocation.toString());
 
-                                    //step.polyline
-                                    //Note: cannot toast here, no idea why
-                                    Log.d(TAG, "HTML instructions: " + step.htmlInstructions + "\n");
-                                    Log.d(TAG, String.valueOf(step.polyline.decodePath().size()));
+                        for (final DirectionsStep step : leg.steps) {
+                            //Note: cannot toast here, no idea why
+                            Log.d(TAG, "HTML instructions: " + step.htmlInstructions + "\n");
+                            Log.d(TAG, String.valueOf(step.polyline.decodePath().size()));
 
-                                    /* How to draw polylines:
-                                    1. Get decoded path of a list of latlng from step
-                                    2. Add this list to draw a poly line
-                                    Codes:
-                                    List<com.google.maps.model.LatLng> listOfLatlng = step.polyline.decodePath();
-                                    mMap.addPolyline(new PolylineOptions().addAll((Iterable) listOfLatlng));
-                                    */
+                            //Note: Error would error if drawing poly lines not on the main thread
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    //Draw polyline
+                                    List<LatLng> listOfLatlng = Utils.ListOfMapsLatLngToAndroidLatLng(step.polyline.decodePath());
+                                    //By default geodesic is false
+                                    mMap.addPolyline(new PolylineOptions()
+                                            .addAll(listOfLatlng)
+                                            .width(5)
+                                            .color(Color.BLUE));
 
+                                    //TODO: Save polyline in combination with html instruction
+                                    mInstructionsMap.put(listOfLatlng, step.htmlInstructions);
                                 }
-                            }
-                            Log.d(TAG, route.legs[0].distance.humanReadable);
+                            });
                         }
                     }
+                    Log.d(TAG, route.legs[0].distance.humanReadable);
+                }
+            }
 
-                    @Override
-                    public void onFailure(Throwable e) {
-                        Log.d(TAG, "Request directions api error");
-                    }
-                });
+            @Override
+            public void onFailure(Throwable e) {
+                Log.d(TAG, "Request directions api error");
+                e.printStackTrace();
+            }
+        });
+    }
 
+    private void addNavigateButtonListener() {
+        mNavigationButtonCycling.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                navigationButtonOnClickEvent(true);
+            }
+        });
 
+        mNavigateButtonWalking.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                navigationButtonOnClickEvent(false);
+            }
+        });
+    }
+
+    //place_id is a unique identifier that can be used with other Google APIs.
+    //For example, you can use the place_id from a Google Place Autocomplete response to calculate directions to a local business
+    private void addAutoCompleteListeners() {
+        mSourceAutocomplete.setOnPlaceSelectedListener(new PlaceSelectionListener() {
+            @Override
+            public void onPlaceSelected(Place place) {
+                // TODO: Get info about the selected place.
+                Log.i(TAG, "Place: " + place.getName());
+
+                String placeDetailsStr = place.getName() + "\n"
+                        + place.getId() + "\n"
+                        + place.getLatLng().toString() + "\n"
+                        + place.getAddress() + "\n"
+                        + place.getAttributions();
+
+                Log.d(TAG, placeDetailsStr);
+
+                mSourceLatLng = place.getLatLng();
+
+                //TODO: fix issue that onLocationChanged callback is not called when using autocomplete fragments
+                startLocationUpdates();
+            }
+
+            @Override
+            public void onError(Status status) {
+                Log.i(TAG, "An error occurred: " + status);
+            }
+        });
+
+        mDestinationAutocomplete.setOnPlaceSelectedListener(new PlaceSelectionListener() {
+            @Override
+            public void onPlaceSelected(Place place) {
+                // TODO: Get info about the selected place.
+                Log.i(TAG, "Place: " + place.getName());
+
+                String placeDetailsStr = place.getName() + "\n"
+                        + place.getId() + "\n"
+                        + place.getLatLng().toString() + "\n"
+                        + place.getAddress() + "\n"
+                        + place.getAttributions();
+
+                mDestinationLatLng = place.getLatLng();
+
+                //TODO: fix issue that onLocationChanged callback is not called when using autocomplete fragments
+                startLocationUpdates();
+            }
+
+            @Override
+            public void onError(Status status) {
+                Log.i(TAG, "An error occurred: " + status);
             }
         });
     }
