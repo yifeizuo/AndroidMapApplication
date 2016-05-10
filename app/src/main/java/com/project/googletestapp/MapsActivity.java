@@ -13,6 +13,7 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
 import android.support.v4.content.ContextCompat;
+import android.text.Html;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -105,6 +106,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private Toast mInstructionToast = null;
 
     private static final String GOOGLE_MAPS_SERVER_API_KEY = "AIzaSyAGFZeAMuorbEdxNitNHt7l1PIbsvveQ4I";
+
+    private static final double LOCATION_ON_PATH_TOLERANCE = 5; //By default it is 0.1D meters
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -382,12 +385,14 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             List<LatLng> step = entry.getKey();
             String instruction = entry.getValue();
 
-            Log.d(TAG, "sss");
+
 
             //If current location is on a path of the whole navigation route
-            if ( PolyUtil.isLocationOnPath(Utils.LocationToAndroidLatLng(mCurrentLocation), step, false) ) {
+            boolean ret = PolyUtil.isLocationOnPath(Utils.LocationToAndroidLatLng(mCurrentLocation), step, false, LOCATION_ON_PATH_TOLERANCE);
+            Log.d(TAG, "ret: " + ret);
+            if ( ret ) {
                 //Update instruction to user
-                mInstructionToast.setText(instruction);
+                mInstructionToast.setText( Html.fromHtml(instruction) );
                 mInstructionToast.show();
                 break;
             }
